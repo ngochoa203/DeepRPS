@@ -1,9 +1,14 @@
 {
   "name": "deeprps",
   "version": "1.0.0",
+  "description": "Deep RPS - Advanced Rock Paper Scissors AI",
+  "main": "index.js",
   "scripts": {
-    "build": "echo 'Static files ready'",
-    "dev": "cd FE && npm run dev"
+    "dev": "cd FE && npm run dev",
+    "build": "cd FE && npm run build",
+    "preview": "cd FE && npm run preview"
   },
-  "devDependencies": {}
+  "keywords": ["rps", "ai", "game", "machine-learning"],
+  "author": "ngochoa203",
+  "license": "MIT"
 }

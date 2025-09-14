@@ -12,7 +12,7 @@ import numpy as np
 from .bandit import LinUCB
 from .fingerprint import behavior_fingerprint, cosine_similarity
 from .storage import StateStorage
-from .utils import softmax, one_hot, best_response_move, entropy
+from .utils import softmax, one_hot, best_response_move, MOVES, entropy
 
 
 @dataclass
@@ -198,36 +198,38 @@ class GameBrain:
             confidence *= (1.0 - 0.4 * us.seed_weight)
         choices = [base_choice, m_look]
         weights = [0.6 * confidence + 0.1, 0.3 + 0.3 * (1 - confidence)]
-        # Anti-exploit detection and counter-response
+        # ULTIMATE DOMINATION SYSTEM: INSTANT MAXIMUM RESPONSE
         anti_info = None
         anti_s, anti_move = self._user_counters_last_ai_prob(us)
         is_exploiting = self._exploitation_alert(us)
         
-        # Trigger on ANY pattern detection OR exploitation alert
-        if (anti_s is not None and anti_s >= 0.10) or is_exploiting:
+        # Trigger on MINIMAL pattern detection OR exploitation alert
+        if (anti_s is not None and anti_s >= 0.01) or is_exploiting:  # 1% threshold!
             if anti_move is not None:
                 choices.append(anti_move)
             
-            # Aggressive weighting for pattern counter
-            base_weight = 2.0 if anti_s is not None and anti_s >= 0.10 else 1.5
-            # Scale 2.0..8.0 as anti_s goes 0.10..1.0 (much more aggressive)
+            # MAXIMUM DOMINATION WEIGHTING SYSTEM
+            base_weight = 5.0 if anti_s is not None and anti_s >= 0.01 else 3.0
+            # Scale 5.0..20.0 as anti_s goes 0.01..1.0 (extreme aggression)
             if anti_s is not None:
-                weight = base_weight + 6.0 * min(1.0, (anti_s - 0.10) / 0.90)
+                weight = base_weight + 15.0 * min(1.0, (anti_s - 0.01) / 0.99)
             else:
                 weight = base_weight
                 
-            # Apply exploitation multipliers
+            # EXTREME multipliers for guaranteed dominance
             if is_exploiting:
-                weight *= 6.0  # 6x multiplier for exploitation
-            if len(us.history) <= 8:  # Extended early rounds
-                weight *= 3.0  # 3x early game multiplier
+                weight *= 10.0  # 10x multiplier for exploitation
+            if len(us.history) <= 10:  # Extended early learning
+                weight *= 5.0  # 5x early game multiplier
             if len(us.history) >= 2 and us.history[-1]["result"] == "lose":
-                weight *= 2.0  # 2x after immediate loss
+                weight *= 4.0  # 4x after immediate loss
+            if len(us.history) >= 2 and us.history[-1]["result"] == "draw":
+                weight *= 3.0  # 3x after draw (should never draw)
             
             weights.append(weight)
             anti_info = {"p_counter": anti_s, "anti_move": int(anti_move) if anti_move is not None else None}
             
-            # Multi-variant counter-strategies
+            # MAXIMUM VARIANT SYSTEM - Add 5 different counter-strategies
             variant_threshold = 0.08 if is_exploiting else 0.12  # Even lower threshold
             if anti_s is not None and anti_s >= variant_threshold:
                 
@@ -296,14 +298,17 @@ class GameBrain:
                     weights.append(weight * 1.0)  # Full weight backup
         if meta_move is not None:
             choices.append(meta_move)
-            # MASSIVE boost for meta moves when exploitation detected - IMMEDIATE PRIORITY
+            # MAXIMUM boost for meta moves - ALWAYS PRIORITIZE WINNING
             base_meta_weight = 0.3 * (1 - confidence) + (0.1 if len(us.history) >= 2 else 0.4)
-            if is_exploiting or (anti_s is not None and anti_s >= 0.10):
-                # MAXIMUM priority for early meta rules when being exploited
-                if len(us.history) <= 4:  # First 4 rounds get extreme priority
-                    base_meta_weight *= 8.0  # 8x boost for early meta under exploitation
+            if is_exploiting or (anti_s is not None and anti_s >= 0.01):  # Lower threshold
+                # EXTREME priority for meta rules when ANY pattern detected
+                if len(us.history) <= 6:  # First 6 rounds get maximum priority
+                    base_meta_weight *= 15.0  # 15x boost for early meta
                 else:
-                    base_meta_weight *= 4.0  # 4x boost for later meta
+                    base_meta_weight *= 10.0  # 10x boost for later meta
+            else:
+                # Even without exploitation, boost meta learning
+                base_meta_weight *= 3.0  # 3x default boost
             weights.append(base_meta_weight)
         # AI-conditioned user model (how user responds to our move)
         ai_cond = self._ai_conditioned_move(us)
@@ -320,25 +325,25 @@ class GameBrain:
             choices.append(int(knn_move))
             weights.append(0.15 + 0.25 * (1.0 - confidence))
 
-        # EXTREME RESPONSE when exploitation detected - ELIMINATE predictable strategies
-        if is_exploiting or (anti_s is not None and anti_s >= 0.10):
-            # DESTROY basic strategies completely
+        # TOTAL ANNIHILATION when exploitation detected - ELIMINATE ALL predictable strategies
+        if is_exploiting or (anti_s is not None and anti_s >= 0.01):  # Lower threshold
+            # OBLITERATE basic strategies completely
             if len(weights) >= 1:
-                weights[0] *= 0.02  # Almost eliminate base_choice (BR) - 2%
+                weights[0] *= 0.001  # Virtually eliminate base_choice (BR) - 0.1%
             if len(weights) >= 2:
-                weights[1] *= 0.5   # Reduce lookahead significantly
+                weights[1] *= 0.1   # Severely reduce lookahead
             
-            # MASSIVELY boost all anti-exploitation strategies
+            # MASSIVELY boost ALL anti-exploitation strategies
             for i in range(2, len(weights)):
                 if i < len(choices):
                     # Check if this is one of our anti-exploitation moves
                     current_move = choices[i]
-                    if (anti_move is not None and current_move == anti_move) or i >= len(choices) - 6:
+                    if (anti_move is not None and current_move == anti_move) or i >= len(choices) - 10:
                         # This is likely an anti-exploitation strategy
-                        weights[i] *= 5.0  # 5x boost for anti-strategies
+                        weights[i] *= 20.0  # 20x boost for anti-strategies
                     else:
-                        # Other strategic moves get moderate boost
-                        weights[i] *= 2.5
+                        # Other strategic moves get major boost
+                        weights[i] *= 8.0
         tallies = np.zeros(3, dtype=np.float32)
         for c, wgt in zip(choices, weights):
             tallies[int(c)] += wgt
@@ -380,33 +385,37 @@ class GameBrain:
                 eps = max(eps, 0.8)  # 80% randomness in early exploitation
             
         if self._is_adversarial(us) or is_exploiting:
-            # OVERRIDE: If we have strong pattern detection (>90% confidence), ALWAYS use it
+            # ABSOLUTE OVERRIDE: If we have ANY pattern detection, ALWAYS use it
             if anti_info is not None and anti_move is not None:
                 pattern_confidence = anti_info.get("p_counter", 0.0)
-                if pattern_confidence >= 0.9:  # 90%+ confidence - FORCE use pattern counter
+                if pattern_confidence >= 0.5:  # 50%+ confidence - FORCE use pattern counter
                     ai_move = anti_move
                     policy = "pattern-override-high-conf"
-                elif pattern_confidence >= 0.7:  # 70%+ confidence - likely use pattern counter
-                    if self.rng.random() < 0.9:  # 90% chance to use pattern
+                elif pattern_confidence >= 0.2:  # 20%+ confidence - almost always use pattern counter
+                    if self.rng.random() < 0.95:  # 95% chance to use pattern
                         ai_move = anti_move
                         policy = "pattern-override-med-conf"
                     else:
                         ai_move = self.rng.randrange(3)
                         policy = "anti-track-mix"
+                elif pattern_confidence >= 0.01:  # Even tiny confidence - prefer pattern
+                    if self.rng.random() < 0.8:  # 80% chance to use pattern
+                        ai_move = anti_move
+                        policy = "pattern-override-low-conf"
+                    else:
+                        ai_move = self.rng.randrange(3)
+                        policy = "anti-track-mix"
                 else:
-                    # Lower confidence - use standard anti-tracking
-                    if self.rng.random() < 0.2:  # Reduced predictable BR
-                        ai_move = br_move
-                        policy = "anti-track-br"
-                    elif self.rng.random() < 0.6:
-                        ai_move = anti_move  # Use our best counter-strategy
+                    # Very low confidence - still favor pattern over random
+                    if self.rng.random() < 0.6:
+                        ai_move = anti_move if anti_move is not None else self.rng.randrange(3)
                         policy = "anti-track-counter"
                     else:
-                        ai_move = self.rng.randrange(3)  # Pure random
+                        ai_move = self.rng.randrange(3)
                         policy = "anti-track-mix"
             else:
-                # No pattern detected - use standard anti-tracking
-                if self.rng.random() < 0.2:
+                # No pattern detected - minimal randomness
+                if self.rng.random() < 0.7:  # Prefer BR over random
                     ai_move = br_move
                     policy = "anti-track-br"
                 else:
@@ -447,14 +456,16 @@ class GameBrain:
                     elif f in ["br", "style"]:  # Penalize predictable families
                         ucb *= 0.4  # Even lower penalty
                     elif f in ["anti", "ai_cond"]:  # Massive boost for counter-strategies
-                        # Extra boost if we have high confidence pattern
-                        pattern_boost = 3.0
+                        # MAXIMUM boost for any pattern confidence
+                        pattern_boost = 8.0  # Base 8x boost
                         if anti_info is not None:
                             pattern_confidence = anti_info.get("p_counter", 0.0)
-                            if pattern_confidence >= 0.9:
-                                pattern_boost = 5.0  # 5x boost for 90%+ confidence
-                            elif pattern_confidence >= 0.7:
-                                pattern_boost = 4.0  # 4x boost for 70%+ confidence
+                            if pattern_confidence >= 0.5:
+                                pattern_boost = 15.0  # 15x boost for 50%+ confidence
+                            elif pattern_confidence >= 0.2:
+                                pattern_boost = 12.0  # 12x boost for 20%+ confidence
+                            elif pattern_confidence >= 0.01:
+                                pattern_boost = 10.0  # 10x boost for any confidence
                         ucb *= pattern_boost
                         
                 scores[f] = float(ucb)
@@ -769,31 +780,23 @@ class GameBrain:
             
             # INSTANT EXPLOITATION RESPONSE - Round 2 is critical
             if res == "lose":  # We lost round 1 - IMMEDIATE COUNTER-STRATEGY
-                # Assume they'll repeat their winning move OR counter our last move
-                if last_u == (last_ai + 1) % 3:  # They countered us
-                    # They're likely to counter again - use double counter
-                    expected_user = (last_ai + 1) % 3  # They'll counter our R1 move again
-                    move = (expected_user + 1) % 3  # We counter their expected counter
-                    return move, "meta-r2-anti-counter"
-                else:
-                    # They played something else and won - assume they'll repeat
-                    move = (last_u + 1) % 3  # Counter their likely repeat
-                    return move, "meta-r2-anti-repeat"
-                    
+                # ALWAYS assume they'll repeat their winning move first
+                move = (last_u + 1) % 3  # Counter their likely repeat (most common)
+                return move, "meta-r2-anti-repeat-priority"
             elif res == "draw":  # Draw means they might have a pattern
-                # Assume they'll either repeat or counter our R1 move
-                repeat_counter = (last_u + 1) % 3
-                ai_counter = (last_ai + 1) % 3
-                our_response = (ai_counter + 1) % 3
-                # Choose the more aggressive response
-                move = repeat_counter if self.rng.random() < 0.6 else our_response
-                return move, "meta-r2-draw-aggressive"
-                
+                # Assume they'll repeat the draw move (users love patterns that work)
+                move = (last_u + 1) % 3  # Counter their likely repeat
+                return move, "meta-r2-draw-anti-repeat"
             else:  # res == "win" - We won but still be cautious
-                # They might try to counter our winning move
-                counter = (last_ai + 1) % 3  # They might counter our R1 winner
-                move = (counter + 1) % 3    # We counter their expected counter
-                return move, "meta-r2-defend-win"
+                # They might repeat their move or try to counter our winning move
+                if self.rng.random() < 0.7:  # 70% chance they repeat their move
+                    move = (last_u + 1) % 3  # Counter their likely repeat
+                    return move, "meta-r2-defend-anti-repeat"
+                else:
+                    # They might try to counter our winning move
+                    counter = (last_ai + 1) % 3  # They might counter our R1 winner
+                    move = (counter + 1) % 3    # We counter their expected counter
+                    return move, "meta-r2-defend-win"
                 
         if n == 2:
             # Round 3 - Look for immediate patterns
@@ -914,6 +917,58 @@ class GameBrain:
         if len(us.history) < 1:
             return None, None
         
+        # INSTANT PATTERN DETECTION - Check for repeats AND cycles
+        if len(us.history) >= 3:
+            # Check last moves for various patterns
+            recent_moves = [h["u_move"] for h in us.history[-6:]]
+            recent_results = [h["result"] for h in us.history[-6:]]
+            
+            # PRIORITY 1: Check for 3-move cycles (Paper-Rock-Scissors-Paper-Rock-Scissors)
+            if len(recent_moves) >= 3:
+                # Check if we have a 3-move cycle pattern
+                cycle_matches = 0
+                for i in range(3, len(recent_moves)):
+                    if recent_moves[i] == recent_moves[i-3]:  # Same as 3 moves ago
+                        if recent_results[i] in ["lose", "draw"]:  # And it was successful
+                            cycle_matches += 2  # Extra weight for successful cycles
+                        else:
+                            cycle_matches += 1
+                
+                # If we have 2+ cycle matches, predict next move in cycle
+                if cycle_matches >= 2:
+                    cycle_pos = len(recent_moves) % 3
+                    if cycle_pos == 0:
+                        expected_user = recent_moves[-3] if len(recent_moves) >= 3 else recent_moves[0]
+                    elif cycle_pos == 1:
+                        expected_user = recent_moves[-2] if len(recent_moves) >= 2 else recent_moves[1] 
+                    else:
+                        expected_user = recent_moves[-1]
+                    
+                    confidence = min(0.95, 0.6 + 0.1 * cycle_matches)
+                    counter_move = (expected_user + 1) % 3
+                    return confidence, counter_move
+            
+            # PRIORITY 2: Check for simple repeats  
+            if len(recent_moves) >= 2:
+                last_move = recent_moves[-1]
+                repeat_count = 0
+                for i in range(len(recent_moves) - 1, -1, -1):
+                    if recent_moves[i] == last_move:
+                        repeat_count += 1
+                    else:
+                        break
+                
+                # If user repeated same move 2+ times, MAXIMUM confidence counter
+                if repeat_count >= 2:
+                    # Check if they had success with this move
+                    success_count = sum(1 for i in range(len(recent_results) - repeat_count, len(recent_results)) 
+                                      if recent_results[i] in ["lose", "draw"])
+                    
+                    if success_count >= 1:  # Any success = assume they'll continue
+                        confidence = min(0.99, 0.7 + 0.1 * repeat_count)  # Higher confidence with more repeats
+                        counter_move = (last_move + 1) % 3  # Direct counter
+                        return confidence, counter_move
+        
         # INSTANT RESPONSE AFTER ROUND 1 - Assume any successful move will be repeated
         if len(us.history) == 1:
             first_round = us.history[0]
@@ -960,11 +1015,15 @@ class GameBrain:
             elif user_now == (prev_ai + 2) % 3:  # Beat our last move
                 beat_cnt += weight
                 
-            # Check for repeating their last successful move
+            # Check for repeating moves with MAXIMUM emphasis
             if i > 0:
                 prev_user = recent[i-1]["u_move"]
-                if user_now == prev_user and result in ["lose", "draw"]:
-                    repeat_cnt += weight * 2.0  # Extra weight for repeating winners
+                if user_now == prev_user:
+                    # ANY repeat gets weight, successful repeats get MASSIVE weight
+                    if result in ["lose", "draw"]:
+                        repeat_cnt += weight * 6.0  # 6x weight for successful repeats
+                    else:
+                        repeat_cnt += weight * 3.0  # 3x weight for any repeat
                     
             # Lag-2 pattern (counter to 2 moves ago)
             if i >= 2:
@@ -1007,8 +1066,8 @@ class GameBrain:
         # Find strongest pattern including alternating
         max_prob = max(lag1_prob, lag2_prob, copy_prob, beat_prob, repeat_prob, alt_2_prob, cycle_3_prob)
         
-        # ULTRA-LOW threshold - activate on ANY hint of pattern (even 1 occurrence)
-        min_threshold = 0.08 if len(us.history) <= 3 else 0.05  # Even lower for early rounds
+        # MAXIMUM SENSITIVITY - activate on ANY pattern hint whatsoever
+        min_threshold = 0.02 if len(us.history) <= 3 else 0.01  # Extremely low thresholds
         
         if max_prob < min_threshold:
             return None, None
@@ -1019,8 +1078,8 @@ class GameBrain:
         if prev_ai is None:
             return None, None
         
-        # INSTANT MAXIMUM COUNTER-STRATEGY INCLUDING ALTERNATING PATTERNS
-        confidence_boost = 2.0  # Double reported confidence
+        # MAXIMUM CONFIDENCE GUARANTEE - AI MUST WIN when pattern detected
+        confidence_boost = 5.0  # 5x reported confidence for absolute dominance
         
         if alt_2_prob == max_prob and len(us.history) >= 2:
             # 2-move alternating pattern detected (e.g., Scissors-Paper-Scissors-Paper)
@@ -1035,18 +1094,27 @@ class GameBrain:
                 return min(alt_2_prob * confidence_boost, 1.0), anti_move
                 
         elif cycle_3_prob == max_prob and len(us.history) >= 3:
-            # 3-move cycle pattern detected (A-B-C-A-B-C)
-            user_moves = [h["u_move"] for h in us.history[-6:]]  # Look at last 6 moves
+            # 3-move cycle pattern detected (Paper-Rock-Scissors-Paper-Rock-Scissors)
+            user_moves = [h["u_move"] for h in us.history[-9:]]  # Look at more moves
             if len(user_moves) >= 3:
-                # Predict next move in 3-move cycle
+                # DIRECT PATTERN PREDICTION - If last 3 moves were Paper(1)-Rock(0)-Scissors(2)
+                # Then next should be Paper(1) again
                 cycle_pos = len(user_moves) % 3
-                expected_user = user_moves[-(3-cycle_pos)] if (3-cycle_pos) <= len(user_moves) else user_moves[-1]
+                
+                # Get the move from 3 positions ago (start of current cycle)
+                if len(user_moves) >= 3:
+                    expected_user = user_moves[-3]  # Move from 3 positions ago
+                else:
+                    expected_user = user_moves[cycle_pos]  # Fallback
+                
                 anti_move = (expected_user + 1) % 3
-                return min(cycle_3_prob * confidence_boost, 1.0), anti_move
+                # MAXIMUM confidence for 3-move cycles - they're very predictable
+                ultra_confidence = min(cycle_3_prob * confidence_boost * 2.0, 0.98)  # Extra 2x boost
+                return ultra_confidence, anti_move
                 
         elif repeat_prob == max_prob and last_user is not None:
-            # They're repeating successful moves - counter directly
-            return min(repeat_prob * confidence_boost, 1.0), (last_user + 1) % 3
+            # They're repeating moves - GUARANTEED counter with maximum confidence
+            return min(repeat_prob * confidence_boost, 0.99), (last_user + 1) % 3
             
         elif lag1_prob == max_prob:
             # Counter-to-AI pattern - use multi-level counter
@@ -1233,19 +1301,27 @@ class GameBrain:
                 if alt_2_matches >= 2.0:  # At least 2 alternations
                     patterns["alternating"] += alt_2_matches
                 
-                # Check 3-move cycle (A-B-C-A-B-C)
-                if len(user_moves) >= 6:
+                # HYPER-SENSITIVE 3-move cycle (A-B-C-A-B-C) - Detect from 3 moves
+                if len(user_moves) >= 3:
                     cycle_3_matches = 0
-                    for i in range(3, len(user_moves)):
-                        if user_moves[i] == user_moves[i-3]:  # Same as 3 moves ago
-                            weight = 4.0 if results[i] in ["lose", "draw"] else 1.0
-                            cycle_3_matches += weight
                     
-                    if cycle_3_matches >= 2.0:  # At least 2 cycle matches
-                        patterns["cycle"] += cycle_3_matches
+                    # Check if last 3 moves form a specific pattern (e.g., Paper-Rock-Scissors)
+                    if len(user_moves) >= 3:
+                        # Check for consistency in pattern across all available moves
+                        for i in range(3, len(user_moves)):
+                            if user_moves[i] == user_moves[i-3]:  # Same as 3 moves ago
+                                # Extra weight for success AND consistency
+                                if results[i] in ["lose", "draw"]:
+                                    cycle_3_matches += 6.0  # High weight for successful cycle moves
+                                else:
+                                    cycle_3_matches += 2.0  # Still evidence of pattern
+                    
+                    # Lower threshold for faster detection
+                    if cycle_3_matches >= 1.0:  # Detect much earlier
+                        patterns["cycle"] += cycle_3_matches * 2.0  # Double the impact
             
-            # Trigger on ANY weighted pattern >= 1.5 (even single successful occurrence)
-            if any(score >= 1.5 for score in patterns.values()):
+            # Trigger on ANY weighted pattern >= 0.5 (ultra-sensitive)
+            if any(score >= 0.5 for score in patterns.values()):
                 return True
         
         # LOGLOSS EXTREME SENSITIVITY

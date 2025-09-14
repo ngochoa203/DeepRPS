@@ -4,8 +4,6 @@ import json
 import os
 from typing import Dict, Optional
 import numpy as np
-import asyncio
-from .database import get_database_adapter, DatabaseAdapter
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -19,12 +17,6 @@ class StateStorage:
     def __init__(self, state_dir: str):
         self.state_dir = state_dir
         os.makedirs(self.state_dir, exist_ok=True)
-        self.db_adapter: Optional[DatabaseAdapter] = None
-        try:
-            self.db_adapter = get_database_adapter()
-        except Exception as e:
-            print(f"Database adapter failed, using file storage: {e}")
-            self.db_adapter = None
 
     def _global_path(self) -> str:
         return os.path.join(self.state_dir, "global_state.json")

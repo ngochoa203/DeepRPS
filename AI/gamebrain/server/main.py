@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 
@@ -19,14 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Use environment-specific state directory
-state_dir = os.getenv("STATE_DIR", "./rps_state")
-brain = GameBrain(state_dir=state_dir, remember_history=True)
-
-# Mount static files if available (for production deployment)
-static_path = os.getenv("STATIC_PATH", "./static")
-if os.path.exists(static_path):
-    app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
+brain = GameBrain(state_dir="./rps_state", remember_history=True)
 
 
 class PredictReq(BaseModel):
