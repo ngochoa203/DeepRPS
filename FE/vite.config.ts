@@ -9,7 +9,7 @@ export default defineConfig(() => ({
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
-    minify: 'terser' as const,
+    minify: 'esbuild' as const,
   },
   server: {
     proxy: {
