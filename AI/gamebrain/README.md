@@ -1,0 +1,58 @@
+# GameBrain RPS
+
+An offline, lightweight Python library for online-learning, personalized opponent modeling and policy for Rock–Paper–Scissors.
+
+- Predicts opponent move distribution p(rock, paper, scissors) using short/long-term context
+- Online updates after each round
+- Personalization with 64-dim user embeddings
+- Behavioral re-ID via 128-dim fingerprints, even when user IDs change
+- Contextual bandit layer (LinUCB or Thompson) on short-term features
+- Change-point detection via log-loss EMA to handle drift
+- Privacy: turn off persistent history storage
+
+This is a CPU-friendly baseline (Markov 1–2-gram + light logistic head) with hooks to swap in a tiny Transformer later.
+
+## Install
+
+Within this folder:
+
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -e .[dev]
+```
+
+## Usage
+
+```python
+from gamebrain import GameBrain
+
+brain = GameBrain(state_dir="./rps_state", remember_history=True)
+
+# Predict next move for a user
+ai_move, meta = brain.predict(user_hint="user123", ctx=None)
+
+# After the round ends, provide feedback
+brain.feedback(user_hint="user123", ai_move=ai_move, user_move=2, dt_ms=350, result='win')
+
+# Periodically save
+brain.save()
+```
+
+- ai_move is 0=Rock, 1=Paper, 2=Scissors
+- `ctx` can include historical events for re-ID: `{ "events": [{"u_move": int, "ai_move": int, "outcome": 'win'|'draw'|'lose', "dt_ms": int}, ...] }`
+
+## Privacy
+
+- Set `remember_history=False` to disable persistence; the library will keep only ephemeral session state and skip disk writes.
+- Stored state lives under `./rps_state` (JSON/NPY files). Remove this folder to reset.
+
+## Evaluation scripts
+
+- Offline metrics: log-loss, ECE
+- Online prequential simulation: win-rate uplift vs baseline n-gram
+- A/B bandit on/off toggle
+
+See `scripts/` for details.
+
+## License
+
+MIT

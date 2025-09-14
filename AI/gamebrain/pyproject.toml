@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gamebrain-rps"
+version = "0.1.0"
+description = "GameBrain: Online-learning, personalized Rock-Paper-Scissors opponent model and policy"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "DeepRPS", email = "noreply@example.com" }]
+license = { text = "MIT" }
+dependencies = [
+  "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+]
+server = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.24",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]

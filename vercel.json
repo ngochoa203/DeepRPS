@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "FE/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    },
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/((?!api).*)",
+      "dest": "FE/dist/$1"
+    }
+  ],
+  "functions": {
+    "api/index.py": {
+      "runtime": "python3.9",
+      "maxDuration": 10
+    }
+  }
+}
