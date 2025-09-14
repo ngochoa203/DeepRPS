@@ -1,29 +1,10 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "FE/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
-    },
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
+  "buildCommand": "cd FE && npm run build",
+  "outputDirectory": "FE/dist",
+  "installCommand": "cd FE && npm install",
+  "functions": {
+    "api/*.py": {
+      "runtime": "python3.12"
     }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "api/index.py"
-    },
-    {
-      "src": "/((?!api).*)",
-      "dest": "FE/dist/$1"
-    }
-  ]
+  }
 }
