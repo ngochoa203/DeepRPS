@@ -1,0 +1,8 @@
+{
+  "name": "deeprps",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "cd FE && npm install && npm run build",
+    "dev": "cd FE && npm run dev"
+  }
+}

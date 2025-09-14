@@ -1,10 +1,7 @@
 {
-  "buildCommand": "cd FE && npm run build",
-  "outputDirectory": "FE/dist",
-  "installCommand": "cd FE && npm install",
   "functions": {
-    "api/*.py": {
-      "runtime": "python3.12"
+    "api/index.py": {
+      "runtime": "python3.9"
     }
   }
 }
