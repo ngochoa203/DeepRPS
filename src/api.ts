@@ -14,23 +14,23 @@ export async function apiPredict(user_hint: string | null, ctx?: any) {
   const res = await fetch('/api/predict', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_hint, ctx }),
+    body: JSON.stringify({ ctx }),
   })
   if (!res.ok) throw new Error('predict failed')
-  return res.json() as Promise<{ ai_move: number; meta: PredictMeta }>
+  return res.json() as Promise<{ ai_move: number; meta: any }>
 }
 
 export async function apiFeedback(
   user_hint: string | null,
   ai_move: number,
   user_move: number,
-  dt_ms: number,
+  dt_ms: number,  
   result: 'win' | 'draw' | 'lose'
 ) {
   const res = await fetch('/api/feedback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_hint, ai_move, user_move, dt_ms, result }),
+    body: JSON.stringify({ ai_move, user_move, result }),
   })
   if (!res.ok) throw new Error('feedback failed')
   return res.json()
