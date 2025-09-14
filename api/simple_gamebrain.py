@@ -8,7 +8,7 @@ import math
 import random
 import os
 import asyncio
-import aiohttp
+import httpx
 
 def softmax(x):
     exp_x = np.exp(x - np.max(x))
