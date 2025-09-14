@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from simple_gamebrain import SimpleGameBrain
+from .numpy_free_gamebrain import SimpleGameBrain
 
 # Initialize FastAPI app
 app = FastAPI(title="GameBrain RPS API")
@@ -40,18 +40,18 @@ async def root():
 
 @app.post("/predict", response_model=PredictRes)
 async def predict(req: PredictReq):
-    ai_move, meta = await brain.predict(req.user_hint, req.ctx)
-    return PredictRes(ai_move=ai_move, meta=meta)
+    result = await brain.predict(req.ctx)
+    return PredictRes(ai_move=result["move"], meta=result)
 
 @app.post("/feedback")
 async def feedback(req: FeedbackReq):
-    await brain.feedback(req.user_hint, req.ai_move, req.user_move, req.dt_ms, req.result)
-    return {"status": "ok"}
+    result = await brain.process_feedback(req.user_move, req.ai_move)
+    return {"status": "ok", "result": result}
 
 @app.post("/save")
 async def save():
-    brain.save()
-    return {"status": "saved"}
+    result = await brain.save_game_state({})
+    return {"status": "saved", "result": result}
 
 # This is required for Vercel
 handler = app
