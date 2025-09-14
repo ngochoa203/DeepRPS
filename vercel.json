@@ -10,7 +10,10 @@
     },
     {
       "src": "api/index.py",
-      "use": "@vercel/python"
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
     }
   ],
   "routes": [
@@ -22,11 +25,5 @@
       "src": "/((?!api).*)",
       "dest": "FE/dist/$1"
     }
-  ],
-  "functions": {
-    "api/index.py": {
-      "runtime": "python3.9",
-      "maxDuration": 10
-    }
-  }
+  ]
 }
