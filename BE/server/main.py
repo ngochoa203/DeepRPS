@@ -6,7 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 
-from BE.gamebrain import GameBrain
+try:
+    from BE.gamebrain import GameBrain  # when running from repo root
+except ImportError:  # when rootDir is BE (Render)
+    from gamebrain import GameBrain
 
 
 app = FastAPI(title="GameBrain RPS API")
