@@ -4,11 +4,11 @@ services:
     env: python
     rootDir: BE
     plan: free
-  buildCommand: pip install -v --no-input -r requirements.txt
-  startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install -v --no-input -r requirements.txt
+    startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.8.1
+        value: 3.11.9
       - key: PYTHONUNBUFFERED
         value: '1'
       - key: PIP_DISABLE_PIP_VERSION_CHECK
