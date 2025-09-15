@@ -36,7 +36,7 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // keyboard: 1/2/3 for moves; hold 'h' to reveal AI, release to hide
+  // keyboard: 1/2/3 for moves; hold 'h' to reveal AI (button below toggles on tap)
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
       if (e.key === '1') onPick(0)
@@ -86,10 +86,8 @@ function App() {
           <button className="secondary" onClick={() => { setScore({ win:0, draw:0, lose:0 }); setHistory([]) }}>Reset</button>
           <button
             className="secondary"
-            onMouseDown={() => setReveal(true)}
-            onMouseUp={() => setReveal(false)}
-            onMouseLeave={() => setReveal(false)}
-            title="Hold to reveal AI (or hold H)"
+            onClick={() => setReveal((v) => !v)}
+            title="Tap to toggle AI reveal"
           >
             {reveal ? <EyeIcon /> : <EyeOffIcon />}
           </button>
