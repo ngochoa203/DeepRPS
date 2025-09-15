@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 
-from gamebrain import GameBrain
+from BE.gamebrain import GameBrain
 
 
 app = FastAPI(title="GameBrain RPS API")

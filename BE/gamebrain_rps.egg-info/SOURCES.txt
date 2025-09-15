@@ -4,6 +4,7 @@ examples/run_game_loop.py
 gamebrain/__init__.py
 gamebrain/bandit.py
 gamebrain/core.py
+gamebrain/database.py
 gamebrain/fingerprint.py
 gamebrain/storage.py
 gamebrain/utils.py
@@ -14,4 +15,7 @@ gamebrain_rps.egg-info/requires.txt
 gamebrain_rps.egg-info/top_level.txt
 scripts/offline_eval.py
 scripts/online_eval.py
+scripts/smoke_repeat_paper.py
+server/main.py
+tests/test_alternating.py
 tests/test_gamebrain.py
