@@ -46,6 +46,8 @@ class UserState:
     expert_eta: float = 0.5
     expert_gamma: float = 0.1
     safe_mode_cooldown: int = 0
+    # Anti-copy lock: when >0, force anti-copy response for a few rounds
+    anti_copy_lock: int = 0
     
     # ADVANCED BEHAVIORAL MODELING - Post-result predictions
     post_draw_transitions: np.ndarray = field(default_factory=lambda: np.ones((3, 3), dtype=np.float32))  # (ai_draw_move, next_user_move)
@@ -91,6 +93,7 @@ class UserState:
             "expert_eta": self.expert_eta,
             "expert_gamma": self.expert_gamma,
             "safe_mode_cooldown": self.safe_mode_cooldown,
+            "anti_copy_lock": self.anti_copy_lock,
         }
 
     @staticmethod
@@ -118,6 +121,7 @@ class UserState:
                 "expert_eta": float(d.get("expert_eta", 0.5)),
                 "expert_gamma": float(d.get("expert_gamma", 0.1)),
                 "safe_mode_cooldown": int(d.get("safe_mode_cooldown", 0)),
+                "anti_copy_lock": int(d.get("anti_copy_lock", 0)),
             }),
         )
 
@@ -791,6 +795,22 @@ class GameBrain:
         except Exception:
             pass
 
+        # HARD ANTI-COPY LOCK: if user just copied AI or suspicion is high, force counter for a few rounds
+        try:
+            if len(us.history) >= 1 and us.history[-1]["ai_move"] is not None:
+                prev_ai_mv = int(us.history[-1]["ai_move"])
+                just_copied = (us.history[-1]["u_move"] == prev_ai_mv)
+                copy_sus = self._copy_suspect_score(us)
+                if just_copied or copy_sus >= 0.35:
+                    # Set or extend lock window (2-3 rounds)
+                    us.anti_copy_lock = max(us.anti_copy_lock, 3 if just_copied else 2)
+                if us.anti_copy_lock > 0:
+                    forced = (prev_ai_mv + 1) % 3
+                    ai_move = forced
+                    policy = "anti-copy-lock"
+        except Exception:
+            pass
+
         # NO-DRAW GUARD: if user likely to repeat their last move, avoid mirroring
         # This reduces long draw streaks against one-move or sticky players.
         if len(us.history) >= 1:
@@ -845,6 +865,8 @@ class GameBrain:
         # decrement safe-mode cooldown after deciding
         if us.safe_mode_cooldown > 0:
             us.safe_mode_cooldown -= 1
+        if us.anti_copy_lock > 0:
+            us.anti_copy_lock -= 1
         return int(ai_move), meta
 
     def feedback(
