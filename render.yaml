@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: deep-rps-be
+    env: python
+    rootDir: BE
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn BE.server.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: STATE_DIR
+        value: /data/rps_state
+      - key: ALLOW_ORIGINS
+        value: '*'
+    healthCheckPath: /healthz
+    autoDeploy: true
+    disk:
+      name: rps-state
+      mountPath: /data
+      sizeGB: 1

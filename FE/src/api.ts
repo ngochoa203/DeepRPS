@@ -10,8 +10,10 @@ export type PredictMeta = {
   soft_seed?: { seeded_from: string; sim: number; w: number } | null
 }
 
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api'
+
 export async function apiPredict(user_hint: string | null, ctx?: any) {
-  const res = await fetch('/api/predict', {
+  const res = await fetch(`${API_BASE}/predict`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user_hint, ctx }),
@@ -27,7 +29,7 @@ export async function apiFeedback(
   dt_ms: number,
   result: 'win' | 'draw' | 'lose'
 ) {
-  const res = await fetch('/api/feedback', {
+  const res = await fetch(`${API_BASE}/feedback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user_hint, ai_move, user_move, dt_ms, result }),

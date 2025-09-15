@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,13 +12,15 @@ from BE.gamebrain import GameBrain
 app = FastAPI(title="GameBrain RPS API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in os.getenv("ALLOW_ORIGINS", "*").split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-brain = GameBrain(state_dir="./rps_state", remember_history=True)
+# Allow configuring persistent state directory (e.g., Render disk mounted at /data)
+STATE_DIR = os.getenv("STATE_DIR", "/data/rps_state")
+brain = GameBrain(state_dir=STATE_DIR, remember_history=True)
 
 
 class PredictReq(BaseModel):
@@ -54,6 +57,16 @@ def feedback(req: FeedbackReq):
 def save():
     brain.save()
     return {"ok": True}
+
+
+@app.get("/")
+def root():
+    return {"ok": True, "service": "DeepRPS backend"}
+
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "healthy"}
 
 
 # Optional: simple 2-player relay via WebSocket (roomless broadcast example)
