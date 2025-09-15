@@ -18,8 +18,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Allow configuring persistent state directory (e.g., Render disk mounted at /data)
-STATE_DIR = os.getenv("STATE_DIR", "/data/rps_state")
+# Allow configuring state directory; default to ephemeral path suitable for free tier
+STATE_DIR = os.getenv("STATE_DIR", "/var/tmp/rps_state")
 brain = GameBrain(state_dir=STATE_DIR, remember_history=True)
 
 

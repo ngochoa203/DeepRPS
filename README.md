@@ -9,16 +9,16 @@ This repo has three folders: `AI/`, `BE/` (FastAPI backend), and `FE/` (Vite + R
 - App entry: `BE.server.main:app`.
 - Health endpoint: `/healthz`.
 - CORS: controlled by `ALLOW_ORIGINS` env (comma-separated list; default `*`).
-- Persistent state: writes to `STATE_DIR` (default `/data/rps_state`). In Render we mount a disk at `/data` via `render.yaml`.
+- State storage: writes to `STATE_DIR` (default `/var/tmp/rps_state`). On Render free tier this is ephemeral. If you need persistence across deploys, upgrade the plan and attach a disk, then set `STATE_DIR` to the mount path (e.g., `/data/rps_state`) and add a `disk` section to `render.yaml`.
 
 ### One-click Render
 
-Render will detect `render.yaml` at repo root.
+Render will detect `render.yaml` at repo root. The provided config targets the free tier (no disks).
 - Service name: `deep-rps-be`
 - Build: `pip install -r requirements.txt`
 - Start: `uvicorn BE.server.main:app --host 0.0.0.0 --port $PORT`
 - Env vars: `PYTHON_VERSION=3.11`, `STATE_DIR=/data/rps_state`, `ALLOW_ORIGINS=*`
-- Disk: `rps-state` mounted at `/data`.
+  Note: Disks are not supported on free tier; for persistence, upgrade and add a disk.
 
 If you prefer manual setup, create a Web Service with:
 - Root directory: `BE`

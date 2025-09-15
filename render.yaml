@@ -10,12 +10,8 @@ services:
       - key: PYTHON_VERSION
         value: 3.11
       - key: STATE_DIR
-        value: /data/rps_state
+        value: /var/tmp/rps_state
       - key: ALLOW_ORIGINS
         value: '*'
     healthCheckPath: /healthz
     autoDeploy: true
-    disk:
-      name: rps-state
-      mountPath: /data
-      sizeGB: 1
