@@ -515,10 +515,11 @@ class GameBrain:
             # Strong weight early; scale with confidence and early rounds
             early_boost = 1.8 if len(us.history) <= 8 else 1.0
             weights.append(0.6 * early_boost + 2.0 * alt_conf * early_boost)
-        # Anti-copy candidate
-        if anti_copy_move is not None and copy_suspect > 0.15:
+        # Anti-copy candidate (more aggressive and earlier)
+        if anti_copy_move is not None and copy_suspect > 0.08:
             choices.append(int(anti_copy_move))
-            weights.append(0.1 + 0.6 * copy_suspect + (0.2 if is_exploiting else 0.0))
+            # Stronger base weight and scale with suspicion
+            weights.append(0.2 + 0.9 * copy_suspect + (0.3 if is_exploiting else 0.0))
         # KNN style-based choice for cold start
         if knn_move is not None and knn_info is not None and knn_info.get("best_sim", 0.0) >= 0.8:
             choices.append(int(knn_move))
@@ -767,6 +768,17 @@ class GameBrain:
                                 move_counts = {m: recent_ai_moves.count(m) for m in [0, 1, 2]}
                                 ai_move = min(move_counts.keys(), key=lambda k: move_counts[k])
                                 policy = "anti-predict-balance"
+        # Immediate anti-copy guard: if user just copied our last move, preemptively counter
+        try:
+            if len(us.history) >= 2 and us.history[-1]["ai_move"] is not None:
+                prev_ai = int(us.history[-1]["ai_move"])  # AI move last round
+                if us.history[-1]["u_move"] == prev_ai:
+                    # They copied last round; choose the move that beats a copy again
+                    preempt = (prev_ai + 1) % 3
+                    ai_move = preempt
+                    policy = "anti-copy-instant"
+        except Exception:
+            pass
 
         # FINAL ALT-2 GUARD: if a strong two-move alternation is detected, hard-counter it
         try:
@@ -2044,23 +2056,27 @@ class GameBrain:
         p = 0.6 * freq + 0.25 * (streak / max(2, window)) + 0.15 * favorable
         return float(max(0.0, min(1.0, p)))
 
-    def _copy_suspect_score(self, us: UserState, window: int = 6) -> float:
+    def _copy_suspect_score(self, us: UserState, window: int = 5) -> float:
         """Measure tendency that user copies our last move.
-        Looks over recent window and counts times user_move == previous ai_move,
-        weighted more if that yielded user non-loss (AI lose/draw). Returns [0,1].
+        Recency-weighted count of events where user_move == previous ai_move.
+        Heavier if that copy yielded user non-loss (AI lose/draw). Returns [0,1].
         """
         if len(us.history) < 2:
             return 0.0
         recent = us.history[-window:]
         score = 0.0
         total = 0.0
-        for i in range(1, len(recent)):
+        n = len(recent)
+        for i in range(1, n):
             prev_ai = recent[i-1]["ai_move"]
             u_now = recent[i]["u_move"]
             res_now = recent[i]["result"]
             if prev_ai is None:
                 continue
-            w = 1.5 if res_now in ["lose", "draw"] else 1.0  # heavier if copy was successful for user
+            # recency weight (newer rounds count more)
+            rec_w = 0.6 + 0.4 * (i / max(1, n-1))
+            success_w = 1.8 if res_now in ["lose", "draw"] else 1.0
+            w = rec_w * success_w
             total += w
             if u_now == prev_ai:
                 score += w
