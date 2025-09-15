@@ -17,6 +17,7 @@ from .experts import (
 )
 from .fingerprint import behavior_fingerprint, cosine_similarity
 from .storage import StateStorage
+from .dataset import DatasetLogger
 from .utils import softmax, one_hot, best_response_move, MOVES, entropy
 
 
@@ -48,6 +49,12 @@ class UserState:
     safe_mode_cooldown: int = 0
     # Anti-copy lock: when >0, force anti-copy response for a few rounds
     anti_copy_lock: int = 0
+    # Anti-copy-2 lock: when >0, preempt a user copying AI's move from two rounds ago
+    anti_copy2_lock: int = 0
+    # Cooldown for alt2-guard to avoid being baited/exploited
+    alt2_guard_cooldown: int = 0
+    # Last chosen policy tag (lightweight, not persisted across restarts strictly necessary)
+    last_policy_tag: Optional[str] = None
     
     # ADVANCED BEHAVIORAL MODELING - Post-result predictions
     post_draw_transitions: np.ndarray = field(default_factory=lambda: np.ones((3, 3), dtype=np.float32))  # (ai_draw_move, next_user_move)
@@ -94,6 +101,8 @@ class UserState:
             "expert_gamma": self.expert_gamma,
             "safe_mode_cooldown": self.safe_mode_cooldown,
             "anti_copy_lock": self.anti_copy_lock,
+            "anti_copy2_lock": self.anti_copy2_lock,
+            "alt2_guard_cooldown": self.alt2_guard_cooldown,
         }
 
     @staticmethod
@@ -122,6 +131,8 @@ class UserState:
                 "expert_gamma": float(d.get("expert_gamma", 0.1)),
                 "safe_mode_cooldown": int(d.get("safe_mode_cooldown", 0)),
                 "anti_copy_lock": int(d.get("anti_copy_lock", 0)),
+                "anti_copy2_lock": int(d.get("anti_copy2_lock", 0)),
+                "alt2_guard_cooldown": int(d.get("alt2_guard_cooldown", 0)),
             }),
         )
 
@@ -151,6 +162,8 @@ class GameBrain:
 
         os.makedirs(self.state_dir, exist_ok=True)
         self.storage = StateStorage(self.state_dir)
+        # Dataset logger for offline training samples
+        self.dataset = DatasetLogger(self.state_dir)
 
         # Global model params (logistic head). Simple linear on features -> 3 logits.
         # Feature dim: ngram1(3) + ngram2_row(3) + ema(3) + last(3) + ue(64) + short(7) = 83
@@ -781,17 +794,47 @@ class GameBrain:
                     preempt = (prev_ai + 1) % 3
                     ai_move = preempt
                     policy = "anti-copy-instant"
+                # Detect lag-2 copy: user equals our move from two rounds ago
+                if len(us.history) >= 3:
+                    prev2_ai = us.history[-2]["ai_move"]
+                    if prev2_ai is not None and us.history[-1]["u_move"] == int(prev2_ai):
+                        # Next they likely copy our last move; preempt with counter to prev_ai
+                        preempt2 = (prev_ai + 1) % 3
+                        ai_move = preempt2
+                        policy = "anti-copy2-instant"
+                        # Arm a short anti-copy2 lock
+                        us.anti_copy2_lock = max(us.anti_copy2_lock, 2)
         except Exception:
             pass
 
-        # FINAL ALT-2 GUARD: if a strong two-move alternation is detected, hard-counter it
+        # FINAL ALT-2 GUARD (adaptive): detect alternation but avoid being exploitable
         try:
             alt_conf2, alt_expected2 = self._detect_two_move_alternating(us)
-            if alt_expected2 is not None and alt_conf2 >= 0.25:  # low threshold for fast lock
+            if alt_expected2 is not None and alt_conf2 >= 0.25:
                 alt_counter2 = (int(alt_expected2) + 1) % 3
-                if ai_move != alt_counter2:
-                    ai_move = alt_counter2
-                    policy = "alt2-guard"
+                # If we just used alt2-guard and didn't win, enter a short cooldown and play bait
+                lost_or_drew_last = (len(us.history) >= 1 and us.history[-1]["result"] in ["lose", "draw"])  # AI perspective
+                last_was_alt2 = (us.last_policy_tag == "alt2-guard")
+                if us.alt2_guard_cooldown > 0 or (last_was_alt2 and lost_or_drew_last):
+                    # Bait: assume user will break alternation to beat our guard
+                    # If they try to beat our guard (alt_counter2), they play (alt_counter2+1)%3; we counter that with (alt_counter2+2)%3
+                    bait_response = (alt_counter2 + 2) % 3
+                    # Mix slight randomness to avoid new pattern
+                    if self.rng.random() < 0.7:
+                        ai_move = bait_response
+                        policy = "alt2-bait"
+                    else:
+                        # pick any move not equal to the naive guard to avoid predictability
+                        candidates = [m for m in [0, 1, 2] if m != alt_counter2]
+                        ai_move = int(self.rng.choice(candidates))
+                        policy = "alt2-bait-mix"
+                    us.alt2_guard_cooldown = max(us.alt2_guard_cooldown, 2)
+                else:
+                    # Softly prefer the guard; do not hard override every time
+                    p_use = min(0.9, 0.45 + 1.2 * float(alt_conf2))  # 45%..~90%
+                    if self.rng.random() < p_use or ai_move == alt_counter2:
+                        ai_move = alt_counter2
+                        policy = "alt2-guard"
         except Exception:
             pass
 
@@ -808,6 +851,14 @@ class GameBrain:
                     forced = (prev_ai_mv + 1) % 3
                     ai_move = forced
                     policy = "anti-copy-lock"
+
+                # Anti-copy-2: if user tends to play our move from two rounds ago, force counter to prev_ai
+                if len(us.history) >= 2 and us.history[-1]["u_move"] == int(us.history[-2]["ai_move"]):
+                    us.anti_copy2_lock = max(us.anti_copy2_lock, 2)
+                if us.anti_copy2_lock > 0:
+                    forced2 = (prev_ai_mv + 1) % 3
+                    ai_move = forced2
+                    policy = "anti-copy2-lock"
         except Exception:
             pass
 
@@ -837,8 +888,113 @@ class GameBrain:
                         if self.rng.random() < (0.6 + 0.3 * copy_sus):
                             ai_move = (last_ai_mv + 1) % 3
                             policy = "anti-copy-guard"
+
+                # Draw spiral breaker (even if rp is modest): if we are matching user's last move and
+                # recent history has frequent draws, flip to the counter to break the spiral.
+                recent5 = us.history[-5:] if len(us.history) >= 5 else us.history
+                draws5 = sum(1 for h in recent5 if h["result"] == "draw")
+                if ai_move == last_user_move and draws5 >= 2 and self.rng.random() < 0.7:
+                    ai_move = (last_user_move + 1) % 3
+                    policy = "draw-spiral-breaker"
             except Exception:
                 pass
+
+        # ANTI-FARMING MODE: when recent win rate collapses, sample from a robust mixed distribution
+        # to avoid being farmed by learned patterns.
+        try:
+            recent = us.history[-8:] if len(us.history) >= 8 else us.history
+            if len(recent) >= 4:
+                wins_recent = sum(1 for h in recent if h["result"] == "win")
+                wr_recent = wins_recent / max(1, len(recent))
+                if wr_recent <= 0.25:  # severe collapse
+                    # Build a robust mix: half uniform, half robust_response probabilities if available
+                    rob_probs = None
+                    if 'robust_meta' in locals() and isinstance(robust_meta, dict):
+                        rob_probs = robust_meta.get("probs")
+                    if rob_probs is not None:
+                        p = 0.5 * (np.ones(3, dtype=np.float32) / 3.0) + 0.5 * np.asarray(rob_probs, dtype=np.float32)
+                    else:
+                        p = np.ones(3, dtype=np.float32) / 3.0
+                    # Lightly avoid matching user's last move to reduce draws
+                    if len(us.history) >= 1:
+                        lu = us.history[-1]["u_move"]
+                        p[lu] *= 0.6
+                        s = float(np.sum(p));
+                        if s > 0:
+                            p /= s
+                    ai_move = int(np.random.choice([0,1,2], p=p))
+                    policy = "anti-farm-mix"
+        except Exception:
+            pass
+
+        # NO-LOSE SUPPORT GUARD: if the user's recent move support is limited (<=2 unique moves),
+        # pick a move that cannot lose against that support (win vs one, draw vs the other at worst).
+        try:
+            recent_win = us.history[-6:] if len(us.history) >= 6 else us.history
+            recent_user_moves = [h["u_move"] for h in recent_win if h.get("u_move") is not None]
+            uniq = sorted(set(int(u) for u in recent_user_moves))
+            if len(recent_user_moves) >= 3 and 1 <= len(uniq) <= 2:
+                # Identify safe candidates: moves m such that for all u in uniq, u != (m+1)%3 (i.e., m does not get beaten)
+                safe_moves = []
+                for m in (0, 1, 2):
+                    loses_any = any(u == (m + 1) % 3 for u in uniq)
+                    if not loses_any:
+                        safe_moves.append(m)
+                if safe_moves:
+                    # Prefer the safe move that wins against the most recent mass
+                    # Score by weighted wins over the recent window
+                    wins_score = {m: 0.0 for m in safe_moves}
+                    for u in recent_user_moves:
+                        for m in safe_moves:
+                            if (u + 1) % 3 == m:  # m beats u
+                                wins_score[m] += 1.0
+                    # If all zero (only draws), just pick any safe move deterministically to stay unpredictable minimal
+                    m_safe = max(wins_score.items(), key=lambda x: (x[1], -x[0]))[0] if wins_score else safe_moves[0]
+                    # Only override if current choice can lose to the support
+                    if any(u == (ai_move + 1) % 3 for u in uniq):
+                        ai_move = int(m_safe)
+                        policy = "no-lose-support-guard"
+        except Exception:
+            pass
+
+        # PROBABILITY-BASED NO-LOSE (TOP-2) GUARD: use predicted user distribution to avoid losing
+        # against their top-2 likely moves. If top-2 mass is high, select a move that cannot be
+        # beaten by those two (draws one, beats the other). This helps vs players with skewed habits.
+        try:
+            p_user = np.asarray(p_ngram, dtype=np.float32)
+            order = list(np.argsort(p_user))
+            top2 = order[-2:] if len(order) >= 2 else order
+            mass2 = float(sum(p_user[i] for i in top2))
+            safe_moves = [m for m in (0, 1, 2) if all(u != (m + 1) % 3 for u in top2)]
+            wr8 = self._calculate_recent_win_rate(us)
+            if safe_moves and (mass2 >= 0.7 or wr8 <= 0.5 or self._exploitation_alert(us)):
+                # Prefer the safe move with highest expected wins under p_user
+                wins_score = {m: float(p_user[(m + 2) % 3]) for m in safe_moves}
+                m_safe2 = max(wins_score.items(), key=lambda x: (x[1], -x[0]))[0]
+                # Override if current choice is risky against top-2 or has high lose-prob
+                risky = any(u == (ai_move + 1) % 3 for u in top2) or float(p_user[(ai_move + 1) % 3]) >= 0.34
+                if risky:
+                    ai_move = int(m_safe2)
+                    policy = "no-lose-top2-guard"
+        except Exception:
+            pass
+
+        # MINIMIZE-LOSE FALLBACK: when under pressure, pick the move with the smallest losing probability
+        # under the predicted user distribution (tie-break by higher win probability).
+        try:
+            recent = us.history[-6:] if len(us.history) >= 6 else us.history
+            wins_recent = sum(1 for h in recent if h.get("result") == "win")
+            wr6 = wins_recent / max(1, len(recent)) if recent else 1.0
+            if wr6 <= 0.34 or self._exploitation_alert(us):
+                lose_probs = [float(p_ngram[(m + 1) % 3]) for m in range(3)]
+                win_probs = [float(p_ngram[(m + 2) % 3]) for m in range(3)]
+                m_min = min(range(3), key=lambda m: (lose_probs[m], -win_probs[m], m))
+                # Only override if current move is noticeably worse on lose-prob
+                if lose_probs[ai_move] - lose_probs[m_min] >= 0.05:
+                    ai_move = int(m_min)
+                    policy = "min-lose-guard"
+        except Exception:
+            pass
 
         meta = {
             "uid": uid,
@@ -867,6 +1023,15 @@ class GameBrain:
             us.safe_mode_cooldown -= 1
         if us.anti_copy_lock > 0:
             us.anti_copy_lock -= 1
+        if us.anti_copy2_lock > 0:
+            us.anti_copy2_lock -= 1
+        if us.alt2_guard_cooldown > 0:
+            us.alt2_guard_cooldown -= 1
+        # Record last policy tag for the next round's adaptive logic
+        try:
+            us.last_policy_tag = policy
+        except Exception:
+            us.last_policy_tag = None
         return int(ai_move), meta
 
     def feedback(
@@ -904,6 +1069,22 @@ class GameBrain:
             us.family_stats[us.last_family] = {"n": n + 1.0, "mean": float(new_mean)}
             # Reset last family after accounting
             us.last_family = None
+
+        # If we used alt2-guard last round and it failed to win, activate cooldown to avoid repeat exploitation
+        if getattr(us, "last_policy_tag", None) == "alt2-guard" and result in ["lose", "draw"]:
+            us.alt2_guard_cooldown = max(us.alt2_guard_cooldown, 2)
+
+        # Penalize mirroring if it just failed: if last AI mirrored user's prior move and lost/drew,
+        # reinforce anti-mirroring by extending anti_copy locks lightly.
+        try:
+            if len(us.history) >= 2:
+                # Check last round decision context
+                prev_user = us.history[-2]["u_move"]
+                prev_ai = us.history[-1]["ai_move"]
+                if prev_ai is not None and prev_ai == prev_user and result in ["lose", "draw"]:
+                    us.anti_copy_lock = max(us.anti_copy_lock, 2)
+        except Exception:
+            pass
 
     # Train logistic head with one SGD step
         features, _ = self._build_features(us)
@@ -1107,6 +1288,27 @@ class GameBrain:
                 "global_ai_to_user_counts": self.global_ai_to_user_counts,
                 "global_expert_w": getattr(self, "global_expert_w", None),
             })
+
+        # Append a dataset record for offline training
+        try:
+            last = us.history[-1] if us.history else None
+            prev = us.history[-2] if len(us.history) >= 2 else None
+            rec = {
+                "user_id": uid,
+                "ai_move": int(ai_move),
+                "user_move": int(user_move),
+                "result": result,
+                "dt_ms": int(dt_ms),
+                # context for next-step learning
+                "prev_ai_move": int(prev["ai_move"]) if prev and prev["ai_move"] is not None else None,
+                "prev_user_move": int(prev["u_move"]) if prev else None,
+                "prev_result": prev["result"] if prev else None,
+                # rolling tags to help offline miners
+                "policy": getattr(us, "last_policy_tag", None),
+            }
+            self.dataset.log(uid, rec)
+        except Exception:
+            pass
 
     # --------- AI-conditioned user model ---------
     def _ai_conditioned_move(self, us: UserState) -> Optional[Tuple[int, float]]:
